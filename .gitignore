@@ -1,0 +1,5 @@
+build/
+*.o
+*.d
+codex_prompt.txt
+ssh_key

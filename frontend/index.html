@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>服务注册中心</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: Arial, "Microsoft YaHei", sans-serif;
+            color: #1f2937;
+            background: #f4f7fb;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        .app { min-height: 100vh; padding: 32px; }
+        .topbar {
+            display: flex; align-items: center;
+            justify-content: space-between; gap: 16px;
+            margin-bottom: 24px;
+        }
+        h1 { margin: 0; font-size: 28px; font-weight: 700; }
+        .header-right {
+            display: flex; align-items: center; gap: 12px;
+            font-size: 13px; color: #6b7280;
+        }
+        button {
+            border: 1px solid #2563eb; border-radius: 6px;
+            background: #2563eb; color: white; cursor: pointer;
+            font-size: 14px; padding: 9px 14px;
+        }
+        button:disabled { cursor: default; opacity: 0.65; }
+        .status { margin-bottom: 16px; color: #4b5563; font-size: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+        .card {
+            background: white; border: 1px solid #dbe3ef;
+            border-radius: 8px; box-shadow: 0 1px 2px rgba(15,23,42,0.05);
+            overflow: hidden;
+        }
+        .card-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 18px; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .card-header:hover { background: #f9fafb; }
+        .card-header-left { display: flex; align-items: center; gap: 10px; }
+        .card-header .arrow {
+            font-size: 12px; color: #9ca3af;
+            transition: transform 0.2s;
+        }
+        .card-header .arrow.open { transform: rotate(90deg); }
+        .service-name { margin: 0; font-size: 16px; font-weight: 600; }
+        .badge {
+            border-radius: 999px; background: #dcfce7; color: #166534;
+            font-size: 12px; font-weight: 700; padding: 3px 8px; white-space: nowrap;
+        }
+        .card-meta {
+            padding: 0 18px 14px; color: #6b7280; font-size: 13px;
+        }
+        .interfaces-panel {
+            border-top: 1px solid #edf2f7; padding: 12px 18px 16px;
+            background: #fafcfe;
+        }
+        .interfaces-title { font-size: 12px; color: #9ca3af; margin-bottom: 8px; font-weight: 600; }
+        .interface-item {
+            display: grid; grid-template-columns: 56px 1fr;
+            gap: 8px; padding: 6px 0; font-size: 13px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .interface-item:last-child { border-bottom: none; }
+        .method {
+            color: #2563eb; font-weight: 700; font-size: 11px;
+            background: #eff6ff; border-radius: 4px; padding: 2px 6px;
+            text-align: center;
+        }
+        .empty {
+            border: 1px dashed #cbd5e1; border-radius: 8px;
+            background: white; color: #64748b;
+            padding: 28px; text-align: center;
+        }
+        .auto-refresh-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #22c55e; display: inline-block;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        @media (max-width: 640px) {
+            .app { padding: 20px; }
+            .topbar { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+<div id="app" class="app">
+    <header class="topbar">
+        <h1>🔄 服务注册中心</h1>
+        <div class="header-right">
+            <span class="auto-refresh-dot"></span>
+            <span>自动刷新中 ({{ autoRefreshInterval }}s)</span>
+            <button type="button" @click="loadServices" :disabled="loading">
+                {{ loading ? '加载中...' : '立即刷新' }}
+            </button>
+        </div>
+    </header>
+
+    <div class="status">{{ message }}</div>
+
+    <main v-if="groupedServices.length > 0" class="grid">
+        <article class="card" v-for="(group, idx) in groupedServices" :key="group.name">
+            <div class="card-header" @click="toggleGroup(idx)">
+                <div class="card-header-left">
+                    <span class="arrow" :class="{ open: expandedGroups[idx] }">▶</span>
+                    <h2 class="service-name">{{ group.name }}</h2>
+                </div>
+                <span class="badge">{{ group.instances.length }} 实例 · UP</span>
+            </div>
+
+            <!-- 展开时显示 -->
+            <template v-if="expandedGroups[idx]">
+                <div class="card-meta" v-if="group.instances.length === 0">
+                    暂无实例
+                </div>
+                <div v-for="inst in group.instances" :key="inst.ip + ':' + inst.port"
+                     :style="group.instances.length > 1 ? 'border-top:1px solid #f3f4f6; padding-top:4px;' : ''">
+                    <div class="card-meta" style="padding-bottom:6px">
+                        {{ inst.ip }}:{{ inst.port }}
+                    </div>
+                    <div class="interfaces-panel" v-if="inst.interfaces && inst.interfaces.length > 0">
+                        <div class="interfaces-title">接口列表 ({{ inst.interfaces.length }})</div>
+                        <div class="interface-item" v-for="item in inst.interfaces"
+                             :key="item.method + ':' + item.path">
+                            <span class="method">{{ item.method }}</span>
+                            <span>{{ item.path }} · {{ item.name }}</span>
+                        </div>
+                    </div>
+                    <div class="interfaces-panel" v-else>
+                        <div class="interfaces-title">暂无接口</div>
+                    </div>
+                </div>
+            </template>
+        </article>
+    </main>
+
+    <div v-else class="empty">暂无已注册的服务实例 ⏳</div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            services: [],
+            loading: false,
+            message: '等待加载服务列表...',
+            expandedGroups: {},
+            autoRefreshInterval: 5,
+            _timer: null
+        };
+    },
+    computed: {
+        groupedServices() {
+            // 按服务名分组
+            const map = {};
+            for (const s of this.services) {
+                const name = s.name || 'unknown';
+                if (!map[name]) {
+                    map[name] = { name, instances: [] };
+                }
+                map[name].instances.push(s);
+            }
+            return Object.values(map);
+        }
+    },
+    mounted() {
+        this.loadServices();
+        this._timer = setInterval(() => {
+            this.loadServices();
+        }, this.autoRefreshInterval * 1000);
+    },
+    beforeUnmount() {
+        if (this._timer) clearInterval(this._timer);
+    },
+    methods: {
+        async loadServices() {
+            this.loading = true;
+            try {
+                const response = await fetch('/api/services');
+                const result = await response.json();
+                this.services = Array.isArray(result.data) ? result.data : [];
+                const count = this.services.length;
+                const groupCount = this.groupedServices.length;
+                this.message = `✅ ${count} 个实例 · ${groupCount} 个服务`;
+            } catch (error) {
+                this.message = `❌ 加载失败: ${error.message}`;
+            } finally {
+                this.loading = false;
+            }
+        },
+        toggleGroup(idx) {
+            this.expandedGroups[idx] = !this.expandedGroups[idx];
+            // 触发响应式更新
+            this.expandedGroups = { ...this.expandedGroups };
+        }
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
